@@ -4,7 +4,8 @@ const NAV_ITEMS = [
   { path: '/', icon: '🏠', label: '홈' },
   { path: '/timeline', icon: '📋', label: '타임라인' },
   { path: '/stats', icon: '📊', label: '통계' },
-  { path: '/memo', icon: '📝', label: '메모' },
+  { path: '/journal', icon: '📖', label: '육아일지' },
+  { path: '/settings', icon: '⚙️', label: '설정' },
 ]
 
 export default function BottomNav() {
