@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -91,6 +92,11 @@ dependencies {
     // Charts (Vico)
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
+
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.messaging)
 
     // Testing
     testImplementation(libs.junit)
