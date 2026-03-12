@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "855674462807",
+    "project_id": "baby-tracker-2f3d4",
+    "storage_bucket": "baby-tracker-2f3d4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:855674462807:android:a6fa0c1c4ce49876f5b912",
+        "android_client_info": {
+          "package_name": "com.babytime.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8HvMcnENamgl60toZ3-8zTIaLWmqGbKY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
