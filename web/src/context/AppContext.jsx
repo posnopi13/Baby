@@ -153,6 +153,20 @@ export function AppProvider({ children }) {
     if (roomId && db) await setDoc(doc(db, 'families', roomId, 'records', record.id), enriched)
   }, [roomId])
 
+  // ─── 기록 수정
+  const updateRecord = useCallback(async (id, updates) => {
+    setRecordsState(prev => {
+      const next = prev.map(r => r.id === id ? { ...r, ...updates } : r)
+        .sort((a, b) => b.startTime - a.startTime)
+      save('bt_records', next)
+      return next
+    })
+    if (roomId && db) {
+      const current = records.find(r => r.id === id)
+      if (current) await setDoc(doc(db, 'families', roomId, 'records', id), { ...current, ...updates })
+    }
+  }, [roomId, records])
+
   // ─── 기록 삭제
   const deleteRecord = useCallback(async id => {
     setRecordsState(prev => { const n = prev.filter(r => r.id !== id); save('bt_records', n); return n })
@@ -246,7 +260,7 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider value={{
       baby, setBaby,
-      records, addRecord, deleteRecord,
+      records, addRecord, updateRecord, deleteRecord,
       memos, addMemo, deleteMemo,
       activeSleep, startSleep, endSleep,
       roomId, roomCode, memberCount,

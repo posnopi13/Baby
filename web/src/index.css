@@ -36,7 +36,7 @@ html, body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  background: #f0d6e8;
+  background: var(--bg, #f0d6e8);
 }
 
 .app-shell {
@@ -59,7 +59,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(255,107,157,0.3);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .header-title {
@@ -575,12 +575,12 @@ html, body {
 
 /* Baby info card */
 .baby-info-card {
-  background: linear-gradient(135deg, #FF6B9D 0%, #FF8FA3 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
   border-radius: 20px;
   padding: 20px;
   color: white;
   margin-bottom: 16px;
-  box-shadow: 0 4px 16px rgba(255,107,157,0.3);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 
 .baby-name {
@@ -719,4 +719,88 @@ html, body {
   font-weight: 700;
   padding: 6px 12px;
   cursor: pointer;
+}
+
+/* Amount increment/decrement buttons */
+.amount-btns {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.amount-btn {
+  flex: 1;
+  min-width: 48px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text);
+  transition: all 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.amount-btn:active {
+  transform: scale(0.95);
+}
+
+.amount-btn-plus {
+  color: var(--primary);
+  border-color: var(--primary-light);
+  background: #FFF0F5;
+}
+
+.amount-btn-minus {
+  color: #888;
+}
+
+/* Record item clickable style */
+.record-item-clickable {
+  cursor: pointer;
+  border-radius: 10px;
+  transition: background 0.1s;
+}
+
+.record-item-clickable:active {
+  background: var(--bg);
+}
+
+/* Active sleep record item */
+.record-item-sleep-active {
+  opacity: 0.8;
+}
+
+/* Quick edit mode pattern toggle */
+.quick-edit-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: white;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-light);
+  position: relative;
+}
+
+.quick-edit-btn.active {
+  border-color: var(--primary);
+  background: #FFF0F5;
+  color: var(--primary-dark);
+}
+
+.quick-edit-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 10px;
 }

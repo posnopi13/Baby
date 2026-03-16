@@ -2,7 +2,17 @@ import { initializeApp } from 'firebase/app'
 import { initializeFirestore, persistentLocalCache } from 'firebase/firestore'
 import { getMessaging, getToken, onMessage } from 'firebase/messaging'
 
-const firebaseConfig = {
+// localStorage에서 런타임 Firebase 설정 로드 (env 파일이 없을 때 대체)
+function getLocalConfig() {
+  try {
+    const stored = localStorage.getItem('bt_firebase_config')
+    if (!stored) return null
+    const cfg = JSON.parse(stored)
+    return (cfg.apiKey && cfg.projectId && !cfg.apiKey.startsWith('your_')) ? cfg : null
+  } catch { return null }
+}
+
+const envConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
@@ -11,12 +21,27 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-// Firebase 설정 여부 확인 (env 파일에 실제 값이 있어야 true)
+const isEnvConfigured = Boolean(
+  envConfig.apiKey && envConfig.projectId && !envConfig.apiKey.startsWith('your_')
+)
+
+const localConfig = !isEnvConfigured ? getLocalConfig() : null
+const firebaseConfig = localConfig || envConfig
+
+// Firebase 설정 여부 확인 (env 파일 또는 localStorage에 실제 값이 있어야 true)
 export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey &&
   firebaseConfig.projectId &&
   !firebaseConfig.apiKey.startsWith('your_')
 )
+
+// localStorage에 저장된 VAPID 키 (env 없을 때 대체)
+export function getSavedVapidKey() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('bt_firebase_config') || '{}')
+    return cfg.vapidKey || import.meta.env.VITE_FIREBASE_VAPID_KEY
+  } catch { return import.meta.env.VITE_FIREBASE_VAPID_KEY }
+}
 
 export let db = null
 export let messaging = null
@@ -68,7 +93,7 @@ export async function requestPushPermission() {
     const permission = await Notification.requestPermission()
     if (permission !== 'granted') return null
     const token = await getToken(messaging, {
-      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+      vapidKey: getSavedVapidKey(),
     })
     return token
   } catch {

@@ -1,19 +1,71 @@
-import { useState } from 'react'
-import { useApp, DEFAULT_PATTERNS } from '../context/AppContext'
+import { useState, useEffect } from 'react'
+import { useApp } from '../context/AppContext'
 import { formatDatetimeLocal } from '../utils/time'
 
-export default function AddRecordModal({ onClose, defaultPatternId }) {
+/**
+ * AddRecordModal
+ * - 추가 모드: defaultPatternId 전달, onClose만 사용
+ * - 편집 모드: editRecord 전달, onSave(updates) 콜백 사용
+ */
+export default function AddRecordModal({ onClose, defaultPatternId, editRecord, onSave }) {
   const { addRecord, startSleep, patterns } = useApp()
-  const [selectedId, setSelectedId] = useState(defaultPatternId || patterns[0].id)
-  const [time, setTime] = useState(formatDatetimeLocal(Date.now()))
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
+  const isEditMode = Boolean(editRecord)
+
+  const [selectedId, setSelectedId] = useState(
+    isEditMode ? editRecord.patternId : (defaultPatternId || patterns[0].id)
+  )
+  const [time, setTime] = useState(
+    isEditMode ? formatDatetimeLocal(editRecord.startTime) : formatDatetimeLocal(Date.now())
+  )
+  const [amount, setAmount] = useState(() => {
+    if (isEditMode) return editRecord.amount?.toString() || ''
+    // 추가 모드: 마지막 입력한 양 불러오기
+    const patId = defaultPatternId || patterns[0].id
+    return localStorage.getItem('bt_last_amount_' + patId) || ''
+  })
+  const [note, setNote] = useState(isEditMode ? editRecord.note || '' : '')
 
   const selected = patterns.find(p => p.id === selectedId)
   const isSleep = selected?.category === 'SLEEP'
 
+  // 추가 모드: 패턴 변경 시 마지막 양 자동 로드
+  useEffect(() => {
+    if (isEditMode) return
+    if (selected?.hasAmount) {
+      const last = localStorage.getItem('bt_last_amount_' + selectedId)
+      setAmount(last || '')
+    } else {
+      setAmount('')
+    }
+  }, [selectedId, isEditMode, selected?.hasAmount])
+
+  function saveLastAmount() {
+    if (selected?.hasAmount && amount) {
+      localStorage.setItem('bt_last_amount_' + selectedId, amount)
+    }
+  }
+
+  function adjustAmount(delta) {
+    setAmount(prev => {
+      const current = parseFloat(prev) || 0
+      const next = Math.max(0, current + delta)
+      return next === 0 ? '' : next.toString()
+    })
+  }
+
   function handleSubmit() {
     const ts = new Date(time).getTime() || Date.now()
+    saveLastAmount()
+
+    if (isEditMode) {
+      onSave({
+        startTime: ts,
+        amount: amount ? parseFloat(amount) : null,
+        note: note || null,
+      })
+      onClose()
+      return
+    }
 
     if (isSleep) {
       startSleep(selectedId)
@@ -31,29 +83,42 @@ export default function AddRecordModal({ onClose, defaultPatternId }) {
     onClose()
   }
 
+  const DELTA_BTNS = [-100, -50, -10, 10, 50, 100]
+
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-sheet">
         <div className="modal-handle" />
-        <div className="modal-title">기록 추가</div>
+        <div className="modal-title">{isEditMode ? '✏️ 기록 수정' : '기록 추가'}</div>
 
-        <div className="form-group">
-          <label className="form-label">종류</label>
-          <div className="pattern-grid">
-            {patterns.map(p => (
-              <button
-                key={p.id}
-                className={`pattern-btn ${selectedId === p.id ? 'selected' : ''}`}
-                onClick={() => setSelectedId(p.id)}
-              >
-                <span className="pattern-btn-icon">{p.icon}</span>
-                <span className="pattern-btn-label">{p.name}</span>
-              </button>
-            ))}
+        {/* 편집 모드에서는 패턴 변경 불가 */}
+        {!isEditMode && (
+          <div className="form-group">
+            <label className="form-label">종류</label>
+            <div className="pattern-grid">
+              {patterns.map(p => (
+                <button
+                  key={p.id}
+                  className={`pattern-btn ${selectedId === p.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedId(p.id)}
+                >
+                  <span className="pattern-btn-icon">{p.icon}</span>
+                  <span className="pattern-btn-label">{p.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        {isSleep ? (
+        {/* 편집 모드: 패턴 정보 표시 */}
+        {isEditMode && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, padding: '10px 14px', background: 'var(--bg)', borderRadius: 12 }}>
+            <span style={{ fontSize: 24 }}>{selected?.icon}</span>
+            <span style={{ fontSize: 15, fontWeight: 700 }}>{selected?.name}</span>
+          </div>
+        )}
+
+        {isSleep && !isEditMode ? (
           <div className="card" style={{ background: '#F5F0FF', borderColor: '#C4B5FF' }}>
             <p style={{ fontSize: 14, color: '#6B4EFF', fontWeight: 600 }}>
               💡 시작 시간이 기록되고, 종료 버튼을 누르면 완료됩니다.
@@ -77,11 +142,24 @@ export default function AddRecordModal({ onClose, defaultPatternId }) {
                 <input
                   type="number"
                   className="form-input"
-                  placeholder={`예: 120`}
+                  placeholder="예: 120"
                   value={amount}
                   onChange={e => setAmount(e.target.value)}
                   inputMode="decimal"
                 />
+                {/* +/- 버튼 */}
+                <div className="amount-btns">
+                  {DELTA_BTNS.map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`amount-btn ${d > 0 ? 'amount-btn-plus' : 'amount-btn-minus'}`}
+                      onClick={() => adjustAmount(d)}
+                    >
+                      {d > 0 ? `+${d}` : d}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -99,7 +177,7 @@ export default function AddRecordModal({ onClose, defaultPatternId }) {
         )}
 
         <button className="btn-primary" onClick={handleSubmit}>
-          {isSleep ? '😴 수면 시작' : '✅ 저장'}
+          {isEditMode ? '✅ 수정 완료' : isSleep ? '😴 수면 시작' : '✅ 저장'}
         </button>
         <button className="btn-secondary" onClick={onClose}>취소</button>
       </div>

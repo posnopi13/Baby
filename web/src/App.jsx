@@ -36,6 +36,14 @@ function AppShell() {
   const { baby, roomId } = useApp()
   const { pathname } = useLocation()
 
+  // 성별에 따라 CSS 변수를 document root에도 적용 (전역 테마)
+  useEffect(() => {
+    const theme = THEMES[baby?.gender] || THEMES.UNKNOWN
+    Object.entries(theme).forEach(([k, v]) => {
+      document.documentElement.style.setProperty(k, v)
+    })
+  }, [baby?.gender])
+
   // 포그라운드 FCM 메시지를 브라우저 알림으로 표시
   useEffect(() => {
     const unsub = onForegroundMessage(payload => {

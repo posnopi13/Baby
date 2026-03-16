@@ -73,6 +73,105 @@ function SyncBadge({ status, isOnline }) {
   )
 }
 
+// ─── Firebase 설정 모달 ──────────────────────────────────────────────────────
+function FirebaseSharingModal({ onClose }) {
+  const [configText, setConfigText] = useState('')
+  const [parsed, setParsed] = useState(null)
+  const [parseError, setParseError] = useState('')
+  const [step, setStep] = useState('paste') // 'paste' | 'confirm'
+
+  function parseConfig(text) {
+    // JSON 파싱 시도
+    try { return JSON.parse(text) } catch {}
+    // JS 객체 형태 파싱 (Firebase 콘솔 복사본)
+    const result = {}
+    const keys = ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId','measurementId']
+    for (const key of keys) {
+      const m = text.match(new RegExp(`${key}:\\s*["'\`]([^"'\`]+)["'\`]`))
+      if (m) result[key] = m[1]
+    }
+    // vapidKey도 파싱 시도
+    const vk = text.match(/vapidKey:\s*["'\`]([^"'\`]+)["'\`]/)
+    if (vk) result.vapidKey = vk[1]
+    return result.apiKey && result.projectId ? result : null
+  }
+
+  function handleParse() {
+    setParseError('')
+    const result = parseConfig(configText)
+    if (!result) {
+      setParseError('파싱 실패: Firebase 설정 형식이 올바르지 않습니다.')
+      return
+    }
+    // authDomain / storageBucket 자동 보완
+    if (!result.authDomain && result.projectId) result.authDomain = `${result.projectId}.firebaseapp.com`
+    if (!result.storageBucket && result.projectId) result.storageBucket = `${result.projectId}.appspot.com`
+    setParsed(result)
+    setStep('confirm')
+  }
+
+  function handleSave() {
+    localStorage.setItem('bt_firebase_config', JSON.stringify(parsed))
+    localStorage.removeItem('bt_skip_sharing')
+    alert('Firebase 설정이 저장됐습니다. 앱을 다시 시작합니다.')
+    window.location.reload()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-sheet">
+        <div className="modal-handle" />
+        <div className="modal-title">👨‍👩‍👧 가족 공유 설정</div>
+
+        {isFirebaseConfigured ? (
+          <>
+            <p style={{ fontSize: 14, color: 'var(--text-light)', lineHeight: 1.8 }}>
+              Firebase가 이미 설정되어 있습니다.<br />
+              앱을 재시작하면 처음 화면에서 방 만들기 / 코드 입력을 선택할 수 있어요.
+            </p>
+            <button className="btn-secondary" onClick={onClose} style={{ marginTop: 16 }}>닫기</button>
+          </>
+        ) : step === 'paste' ? (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-light)', lineHeight: 1.7, marginBottom: 16 }}>
+              <strong>Firebase 콘솔</strong>에서 웹 앱 설정을 복사해 아래에 붙여넣기 해주세요.<br />
+              console.firebase.google.com → 프로젝트 → 앱 추가 → 웹 → 설정 스니펫 복사
+            </p>
+            <div className="form-group">
+              <label className="form-label">Firebase 설정 붙여넣기</label>
+              <textarea
+                className="form-input"
+                style={{ minHeight: 140, resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }}
+                placeholder={`const firebaseConfig = {\n  apiKey: "AIzaSy...",\n  authDomain: "my-app.firebaseapp.com",\n  projectId: "my-app",\n  ...\n};`}
+                value={configText}
+                onChange={e => { setConfigText(e.target.value); setParseError('') }}
+              />
+            </div>
+            {parseError && (
+              <div style={{ color: '#FF6B6B', fontSize: 13, marginBottom: 12 }}>{parseError}</div>
+            )}
+            <button className="btn-primary" onClick={handleParse} disabled={!configText.trim()}>
+              설정 확인
+            </button>
+            <button className="btn-secondary" onClick={onClose}>취소</button>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-light)', marginBottom: 12 }}>아래 설정으로 저장하시겠어요?</p>
+            <div className="card" style={{ background: 'var(--bg)', fontSize: 12, fontFamily: 'monospace', lineHeight: 1.8, marginBottom: 16 }}>
+              {Object.entries(parsed).map(([k, v]) => (
+                <div key={k}><strong>{k}:</strong> {v.length > 30 ? v.slice(0,30)+'…' : v}</div>
+              ))}
+            </div>
+            <button className="btn-primary" onClick={handleSave}>✅ 저장 후 재시작</button>
+            <button className="btn-secondary" onClick={() => setStep('paste')}>← 다시 입력</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const {
@@ -258,26 +357,7 @@ export default function SettingsPage() {
 
       {/* ── 공유 방 관리 모달 ─────────────────────────────────────────────── */}
       {showSharing && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowSharing(false)}>
-          <div className="modal-sheet">
-            <div className="modal-handle" />
-            <div className="modal-title">👨‍👩‍👧 가족 공유</div>
-            {!isFirebaseConfigured ? (
-              <div>
-                <p style={{ fontSize: 14, color: 'var(--text-light)', lineHeight: 1.8, marginBottom: 16 }}>
-                  Firebase 설정 파일 (<code>web/.env</code>)이 없거나 설정이 완료되지 않았습니다.
-                  <br /><code>web/.env.example</code> 파일을 참고해 설정해주세요.
-                </p>
-                <button className="btn-secondary" onClick={() => setShowSharing(false)}>닫기</button>
-              </div>
-            ) : (
-              <p style={{ fontSize: 14, color: 'var(--text-light)', lineHeight: 1.8 }}>
-                앱을 재시작하면 처음 화면에서 방 만들기 / 코드 입력을 선택할 수 있어요.
-                <br />현재 데이터를 백업한 후 재시작을 권장합니다.
-              </p>
-            )}
-          </div>
-        </div>
+        <FirebaseSharingModal onClose={() => setShowSharing(false)} />
       )}
 
       {/* ── 백업 모달 ─────────────────────────────────────────────────────── */}

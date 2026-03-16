@@ -1,78 +1,97 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
-import { formatTime, formatDuration, calcAge, getTodayStart, isSameDay } from '../utils/time'
+import { formatTime, formatDuration, calcAge, getTodayStart } from '../utils/time'
 import AddRecordModal from '../components/AddRecordModal'
 
 const GENDER_ICON = { MALE: '👦', FEMALE: '👧', UNKNOWN: '🍼' }
+const DEFAULT_QUICK_IDS = ['p1', 'p2', 'p4', 'p6', 'p7', 'p3', 'p8']
 
 export default function Home() {
-  const { baby, records, patterns, activeSleep, endSleep } = useApp()
+  const { baby, records, patterns, activeSleep, startSleep, endSleep, addRecord, updateRecord } = useApp()
   const [showModal, setShowModal] = useState(false)
   const [defaultPattern, setDefaultPattern] = useState(null)
   const [sleepDuration, setSleepDuration] = useState(0)
+  const [editingRecord, setEditingRecord] = useState(null)
+  const [quickEditMode, setQuickEditMode] = useState(false)
+  const [quickPatternIds, setQuickPatternIds] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('bt_quick_patterns'))
+      return Array.isArray(saved) ? saved : DEFAULT_QUICK_IDS
+    } catch { return DEFAULT_QUICK_IDS }
+  })
 
   const todayStart = getTodayStart()
   const todayRecords = records.filter(r => r.startTime >= todayStart)
 
-  // Count today's records by category
-  const todayFood = todayRecords.filter(r => {
-    const p = patterns.find(p => p.id === r.patternId)
-    return p?.category === 'FOOD'
-  }).length
+  // 오늘 수유: 횟수 + ml 합계
+  const todayFoodRecords = todayRecords.filter(r => patterns.find(p => p.id === r.patternId)?.category === 'FOOD')
+  const todayFood = todayFoodRecords.length
+  const todayFoodMl = todayFoodRecords.reduce((acc, r) => acc + (r.amount || 0), 0)
 
-  const todaySleep = todayRecords.filter(r => {
-    const p = patterns.find(p => p.id === r.patternId)
-    return p?.category === 'SLEEP'
-  })
-  const totalSleepMs = todaySleep.reduce((acc, r) => {
-    if (r.endTime) return acc + (r.endTime - r.startTime)
-    return acc
-  }, 0)
+  const todaySleep = todayRecords.filter(r => patterns.find(p => p.id === r.patternId)?.category === 'SLEEP')
+  const totalSleepMs = todaySleep.reduce((acc, r) => r.endTime ? acc + (r.endTime - r.startTime) : acc, 0)
 
-  const todayDiaper = todayRecords.filter(r => {
-    const p = patterns.find(p => p.id === r.patternId)
-    return p?.category === 'DIAPER'
-  }).length
+  const todayDiaper = todayRecords.filter(r => patterns.find(p => p.id === r.patternId)?.category === 'DIAPER').length
 
-  // Last feeding info
-  const lastFeed = records.find(r => {
-    const p = patterns.find(p => p.id === r.patternId)
-    return p?.category === 'FOOD'
-  })
-
+  const lastFeed = records.find(r => patterns.find(p => p.id === r.patternId)?.category === 'FOOD')
   const lastFeedPattern = lastFeed ? patterns.find(p => p.id === lastFeed.patternId) : null
 
-  // Active sleep timer
+  // 수면 타이머
   useEffect(() => {
     if (!activeSleep) return
-    const interval = setInterval(() => {
-      setSleepDuration(Date.now() - activeSleep.startTime)
-    }, 1000)
+    const interval = setInterval(() => setSleepDuration(Date.now() - activeSleep.startTime), 1000)
     setSleepDuration(Date.now() - activeSleep.startTime)
     return () => clearInterval(interval)
   }, [activeSleep])
 
   const recentRecords = records.slice(0, 5)
 
-  function openModal(patternId) {
-    setDefaultPattern(patternId)
-    setShowModal(true)
+  // 빠른 기록: 즉시 저장 (수면 제외), 수면은 startSleep, 기타는 모달
+  function handleQuickRecord(patternId) {
+    if (!patternId) {
+      setDefaultPattern(null)
+      setShowModal(true)
+      return
+    }
+    const pattern = patterns.find(p => p.id === patternId)
+    if (pattern?.category === 'SLEEP') {
+      startSleep(patternId)
+      return
+    }
+    // 마지막 기록 양 불러오기
+    const lastAmt = pattern?.hasAmount
+      ? (parseFloat(localStorage.getItem('bt_last_amount_' + patternId)) || null)
+      : null
+    addRecord({
+      id: Date.now().toString(),
+      patternId,
+      startTime: Date.now(),
+      amount: lastAmt,
+      note: null,
+    })
   }
 
-  const QUICK_ACTIONS = [
-    { patternId: 'p1', icon: '🍼', label: '분유' },
-    { patternId: 'p2', icon: '🤱', label: '모유' },
-    { patternId: 'p4', icon: '🌙', label: '수면' },
-    { patternId: 'p6', icon: '💧', label: '쉬' },
-    { patternId: 'p7', icon: '💩', label: '응가' },
-    { patternId: 'p3', icon: '🥣', label: '이유식' },
-    { patternId: 'p8', icon: '💊', label: '약' },
+  // 빠른기록 편집 모드: 패턴 표시 여부 토글
+  function toggleQuickPattern(patternId) {
+    setQuickPatternIds(prev => {
+      const next = prev.includes(patternId)
+        ? prev.filter(id => id !== patternId)
+        : [...prev, patternId]
+      localStorage.setItem('bt_quick_patterns', JSON.stringify(next))
+      return next
+    })
+  }
+
+  const quickActions = [
+    ...quickPatternIds
+      .map(id => { const p = patterns.find(pt => pt.id === id); return p ? { patternId: p.id, icon: p.icon, label: p.name } : null })
+      .filter(Boolean),
     { patternId: null, icon: '➕', label: '기타' },
   ]
 
   return (
     <>
-      {/* Baby info card */}
+      {/* 아기 정보 카드 */}
       <div className="baby-info-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
@@ -89,7 +108,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* Active sleep banner */}
+      {/* 수면 중 배너 */}
       {activeSleep && (
         <div className="sleep-active-banner" onClick={endSleep}>
           <div className="sleep-banner-left">
@@ -103,14 +122,14 @@ export default function Home() {
         </div>
       )}
 
-      {/* Today summary */}
+      {/* 오늘 기록 */}
       <div className="card">
         <div className="card-title">오늘 기록</div>
         <div className="summary-grid">
           <div className="summary-chip">
             <span className="summary-chip-icon">🍼</span>
-            <span className="summary-chip-count">{todayFood}</span>
-            <span className="summary-chip-label">수유</span>
+            <span className="summary-chip-count">{todayFood}회</span>
+            <span className="summary-chip-label">{todayFoodMl > 0 ? `${todayFoodMl}ml` : '수유'}</span>
           </div>
           <div className="summary-chip">
             <span className="summary-chip-icon">😴</span>
@@ -130,29 +149,81 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Quick log */}
+      {/* 빠른 기록 */}
       <div className="card">
-        <div className="card-title">빠른 기록</div>
-        <div className="quick-log-grid">
-          {QUICK_ACTIONS.map(action => (
-            <button
-              key={action.patternId || 'other'}
-              className="quick-btn"
-              onClick={() => openModal(action.patternId)}
-            >
-              <span className="quick-btn-icon">{action.icon}</span>
-              <span className="quick-btn-label">{action.label}</span>
-            </button>
-          ))}
+        <div className="section-header" style={{ marginBottom: 12 }}>
+          <span className="card-title" style={{ marginBottom: 0 }}>빠른 기록</span>
+          <button
+            onClick={() => setQuickEditMode(m => !m)}
+            style={{
+              fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: '4px 10px',
+              borderRadius: 8, border: 'none',
+              background: quickEditMode ? 'var(--primary)' : 'transparent',
+              color: quickEditMode ? 'white' : 'var(--primary)',
+            }}
+          >
+            {quickEditMode ? '완료' : '편집'}
+          </button>
         </div>
+
+        {quickEditMode ? (
+          <>
+            <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 10 }}>빠른 기록에 표시할 항목 선택</p>
+            <div className="quick-log-grid">
+              {patterns.map(p => (
+                <button
+                  key={p.id}
+                  className={`quick-edit-btn ${quickPatternIds.includes(p.id) ? 'active' : ''}`}
+                  onClick={() => toggleQuickPattern(p.id)}
+                >
+                  {quickPatternIds.includes(p.id) && <span className="quick-edit-check">✓</span>}
+                  <span style={{ fontSize: 22 }}>{p.icon}</span>
+                  <span>{p.name}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="quick-log-grid">
+            {quickActions.map(action => (
+              <button
+                key={action.patternId || 'other'}
+                className="quick-btn"
+                onClick={() => handleQuickRecord(action.patternId)}
+              >
+                <span className="quick-btn-icon">{action.icon}</span>
+                <span className="quick-btn-label">{action.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Recent records */}
+      {/* 최근 기록 */}
       <div className="card">
         <div className="section-header">
           <span className="section-title">최근 기록</span>
+          <span style={{ fontSize: 11, color: 'var(--text-light)' }}>탭하여 수정</span>
         </div>
-        {recentRecords.length === 0 ? (
+
+        {/* 수면 진행 중 항목 표시 */}
+        {activeSleep && (() => {
+          const p = patterns.find(pt => pt.id === activeSleep.patternId)
+          return (
+            <div className="record-item record-item-sleep-active">
+              <div className="record-icon-wrap" style={{ background: '#7B68EE22' }}>
+                {p?.icon || '😴'}
+              </div>
+              <div className="record-info">
+                <div className="record-name">{p?.name || '수면'} <span style={{ color: '#7B68EE', fontWeight: 700 }}>진행 중</span></div>
+                <div className="record-detail">{formatDuration(sleepDuration)} 경과</div>
+              </div>
+              <div className="record-time">{formatTime(activeSleep.startTime)}</div>
+            </div>
+          )
+        })()}
+
+        {recentRecords.length === 0 && !activeSleep ? (
           <div className="empty-state">
             <div className="empty-state-icon">📋</div>
             <div className="empty-state-text">아직 기록이 없어요</div>
@@ -161,12 +232,14 @@ export default function Home() {
           recentRecords.map(record => {
             const pattern = patterns.find(p => p.id === record.patternId)
             const duration = record.endTime ? record.endTime - record.startTime : null
+            const hasDetail = record.amount || duration || record.note
             return (
-              <div key={record.id} className="record-item">
-                <div
-                  className="record-icon-wrap"
-                  style={{ background: (pattern?.color || '#FF8FA3') + '22' }}
-                >
+              <div
+                key={record.id}
+                className="record-item record-item-clickable"
+                onClick={() => setEditingRecord(record)}
+              >
+                <div className="record-icon-wrap" style={{ background: (pattern?.color || '#FF8FA3') + '22' }}>
                   {pattern?.icon || '📋'}
                 </div>
                 <div className="record-info">
@@ -175,6 +248,7 @@ export default function Home() {
                     {record.amount ? `${record.amount}${pattern?.amountUnit || ''}` : ''}
                     {duration ? formatDuration(duration) : ''}
                     {record.note ? ` · ${record.note}` : ''}
+                    {!hasDetail && <span style={{ color: 'var(--primary)', opacity: 0.6 }}>탭하여 상세 입력</span>}
                   </div>
                 </div>
                 <div className="record-time">{formatTime(record.startTime)}</div>
@@ -184,10 +258,23 @@ export default function Home() {
         )}
       </div>
 
+      {/* 기타 추가 모달 */}
       {showModal && (
         <AddRecordModal
           onClose={() => setShowModal(false)}
           defaultPatternId={defaultPattern}
+        />
+      )}
+
+      {/* 기록 수정 모달 */}
+      {editingRecord && (
+        <AddRecordModal
+          onClose={() => setEditingRecord(null)}
+          editRecord={editingRecord}
+          onSave={updates => {
+            updateRecord(editingRecord.id, updates)
+            setEditingRecord(null)
+          }}
         />
       )}
     </>
