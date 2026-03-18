@@ -36,6 +36,12 @@ export default function Home() {
   const lastFeed = records.find(r => patterns.find(p => p.id === r.patternId)?.category === 'FOOD')
   const lastFeedPattern = lastFeed ? patterns.find(p => p.id === lastFeed.patternId) : null
 
+  // 최근기록: 오늘 기록 우선, 부족 시 전일 포함해서 최대 20개
+  const olderRecords = records.filter(r => r.startTime < todayStart)
+  const displayRecords = todayRecords.length >= 20
+    ? todayRecords
+    : [...todayRecords, ...olderRecords.slice(0, 20 - todayRecords.length)]
+
   // 수면 타이머
   useEffect(() => {
     if (!activeSleep) return
@@ -44,9 +50,7 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [activeSleep])
 
-  const recentRecords = records.slice(0, 5)
-
-  // 빠른 기록: 즉시 저장 (수면 제외), 수면은 startSleep, 기타는 모달
+  // 빠른 기록: 수면 → startSleep, 기타 → 모달, 나머지 → 즉시 저장
   function handleQuickRecord(patternId) {
     if (!patternId) {
       setDefaultPattern(null)
@@ -58,7 +62,6 @@ export default function Home() {
       startSleep(patternId)
       return
     }
-    // 마지막 기록 양 불러오기
     const lastAmt = pattern?.hasAmount
       ? (parseFloat(localStorage.getItem('bt_last_amount_' + patternId)) || null)
       : null
@@ -71,7 +74,6 @@ export default function Home() {
     })
   }
 
-  // 빠른기록 편집 모드: 패턴 표시 여부 토글
   function toggleQuickPattern(patternId) {
     setQuickPatternIds(prev => {
       const next = prev.includes(patternId)
@@ -94,11 +96,20 @@ export default function Home() {
       {/* 아기 정보 카드 */}
       <div className="baby-info-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div className="baby-name">{baby.name}</div>
-            <div className="baby-age">{calcAge(baby.birthDate) || '아기'}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {baby.photo && (
+              <img
+                src={baby.photo}
+                alt={baby.name}
+                style={{ width: 52, height: 52, borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.5)', flexShrink: 0 }}
+              />
+            )}
+            <div>
+              <div className="baby-name">{baby.name}</div>
+              <div className="baby-age">{calcAge(baby.birthDate) || '아기'}</div>
+            </div>
           </div>
-          <div className="baby-gender-badge">{GENDER_ICON[baby.gender]}</div>
+          {!baby.photo && <div className="baby-gender-badge">{GENDER_ICON[baby.gender]}</div>}
         </div>
         {lastFeed && (
           <div style={{ marginTop: 12, background: 'rgba(255,255,255,0.2)', borderRadius: 10, padding: '8px 12px', fontSize: 13 }}>
@@ -199,63 +210,76 @@ export default function Home() {
         )}
       </div>
 
-      {/* 최근 기록 */}
+      {/* 최근 기록 - 스크롤 가능, 최대 20개 (오늘 우선) */}
       <div className="card">
         <div className="section-header">
           <span className="section-title">최근 기록</span>
           <span style={{ fontSize: 11, color: 'var(--text-light)' }}>탭하여 수정</span>
         </div>
 
-        {/* 수면 진행 중 항목 표시 */}
-        {activeSleep && (() => {
-          const p = patterns.find(pt => pt.id === activeSleep.patternId)
-          return (
-            <div className="record-item record-item-sleep-active">
-              <div className="record-icon-wrap" style={{ background: '#7B68EE22' }}>
-                {p?.icon || '😴'}
-              </div>
-              <div className="record-info">
-                <div className="record-name">{p?.name || '수면'} <span style={{ color: '#7B68EE', fontWeight: 700 }}>진행 중</span></div>
-                <div className="record-detail">{formatDuration(sleepDuration)} 경과</div>
-              </div>
-              <div className="record-time">{formatTime(activeSleep.startTime)}</div>
-            </div>
-          )
-        })()}
-
-        {recentRecords.length === 0 && !activeSleep ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">📋</div>
-            <div className="empty-state-text">아직 기록이 없어요</div>
-          </div>
-        ) : (
-          recentRecords.map(record => {
-            const pattern = patterns.find(p => p.id === record.patternId)
-            const duration = record.endTime ? record.endTime - record.startTime : null
-            const hasDetail = record.amount || duration || record.note
+        <div style={{ maxHeight: 400, overflowY: 'auto', marginRight: -4, paddingRight: 4 }}>
+          {/* 수면 진행 중 항목 */}
+          {activeSleep && (() => {
+            const p = patterns.find(pt => pt.id === activeSleep.patternId)
             return (
-              <div
-                key={record.id}
-                className="record-item record-item-clickable"
-                onClick={() => setEditingRecord(record)}
-              >
-                <div className="record-icon-wrap" style={{ background: (pattern?.color || '#FF8FA3') + '22' }}>
-                  {pattern?.icon || '📋'}
+              <div className="record-item record-item-sleep-active">
+                <div className="record-icon-wrap" style={{ background: '#7B68EE22' }}>
+                  {p?.icon || '😴'}
                 </div>
                 <div className="record-info">
-                  <div className="record-name">{pattern?.name || '기록'}</div>
-                  <div className="record-detail">
-                    {record.amount ? `${record.amount}${pattern?.amountUnit || ''}` : ''}
-                    {duration ? formatDuration(duration) : ''}
-                    {record.note ? ` · ${record.note}` : ''}
-                    {!hasDetail && <span style={{ color: 'var(--primary)', opacity: 0.6 }}>탭하여 상세 입력</span>}
-                  </div>
+                  <div className="record-name">{p?.name || '수면'} <span style={{ color: '#7B68EE', fontWeight: 700 }}>진행 중</span></div>
+                  <div className="record-detail">{formatDuration(sleepDuration)} 경과</div>
                 </div>
-                <div className="record-time">{formatTime(record.startTime)}</div>
+                <div className="record-time">{formatTime(activeSleep.startTime)}</div>
               </div>
             )
-          })
-        )}
+          })()}
+
+          {displayRecords.length === 0 && !activeSleep ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">📋</div>
+              <div className="empty-state-text">아직 기록이 없어요</div>
+            </div>
+          ) : (
+            displayRecords.map((record, idx) => {
+              const pattern = patterns.find(p => p.id === record.patternId)
+              const duration = record.endTime ? record.endTime - record.startTime : null
+              const hasDetail = record.amount || duration || record.note
+              // 날짜 구분선
+              const prevRecord = displayRecords[idx - 1]
+              const showDateSep = idx > 0 && prevRecord &&
+                new Date(prevRecord.startTime).toDateString() !== new Date(record.startTime).toDateString()
+
+              return (
+                <div key={record.id}>
+                  {showDateSep && (
+                    <div style={{ fontSize: 11, color: 'var(--text-light)', fontWeight: 700, padding: '8px 0 4px', borderTop: '1px solid var(--border)', marginTop: 4 }}>
+                      {new Date(record.startTime).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}
+                    </div>
+                  )}
+                  <div
+                    className="record-item record-item-clickable"
+                    onClick={() => setEditingRecord(record)}
+                  >
+                    <div className="record-icon-wrap" style={{ background: (pattern?.color || '#FF8FA3') + '22' }}>
+                      {pattern?.icon || '📋'}
+                    </div>
+                    <div className="record-info">
+                      <div className="record-name">{pattern?.name || '기록'}</div>
+                      <div className="record-detail">
+                        {record.amount ? `${record.amount}${pattern?.amountUnit || ''}` : ''}
+                        {duration ? formatDuration(duration) : ''}
+                        {record.note ? ` · ${record.note}` : ''}
+                        {!hasDetail && <span style={{ color: 'var(--primary)', opacity: 0.6 }}>탭하여 상세 입력</span>}
+                      </div>
+                    </div>
+                    <div className="record-time">{formatTime(record.startTime)}</div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
       </div>
 
       {/* 기타 추가 모달 */}

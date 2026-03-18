@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   collection, doc, setDoc, deleteDoc,
   onSnapshot, getDoc,
@@ -25,6 +25,25 @@ function save(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)) } catch {}
 }
 
+// ─── babies 초기화 (구버전 bt_baby 마이그레이션) ─────────────────────────
+function initBabies() {
+  const existing = load('bt_babies', null)
+  if (existing && existing.length > 0) return existing
+  const oldBaby = load('bt_baby', null)
+  if (oldBaby) {
+    const migrated = [{ ...oldBaby, id: oldBaby.id || 'baby_1' }]
+    save('bt_babies', migrated)
+    save('bt_active_baby_id', migrated[0].id)
+    return migrated
+  }
+  return []
+}
+function initActiveBabyId(babies) {
+  const saved = load('bt_active_baby_id', null)
+  if (saved && babies.find(b => b.id === saved)) return saved
+  return babies[0]?.id || null
+}
+
 // ─── 파트너 알림 ─────────────────────────────────────────────────────────────
 function notifyPartner(type, data) {
   if (Notification.permission !== 'granted') return
@@ -40,22 +59,43 @@ function notifyPartner(type, data) {
   } catch {}
 }
 
+// Firestore 동기화 시 사진 제외 (용량 문제)
+function stripPhoto(baby) {
+  const { photo: _, ...rest } = baby || {}
+  return rest
+}
+
 // ─── Context ─────────────────────────────────────────────────────────────────
 const AppContext = createContext(null)
 
 export function AppProvider({ children }) {
-  const [baby,        setBabyState]        = useState(() => load('bt_baby',         null))
-  const [records,     setRecordsState]     = useState(() => load('bt_records',       []))
-  const [memos,       setMemosState]       = useState(() => load('bt_memos',         []))
-  const [activeSleep, setActiveSleepState] = useState(() => load('bt_active_sleep',  null))
-  const [roomId,      setRoomIdState]      = useState(() => load('bt_room_id',       null))
-  const [roomCode,    setRoomCodeState]    = useState(() => load('bt_room_code',     null))
-  const [memberCount, setMemberCount]      = useState(1)
-  const [syncStatus,  setSyncStatus]       = useState('local') // 'local'|'syncing'|'synced'|'error'
-  const [isOnline,    setIsOnline]         = useState(navigator.onLine)
+  const [babies,        setBabiesState]      = useState(() => initBabies())
+  const [activeBabyId,  setActiveBabyIdState]= useState(() => initActiveBabyId(initBabies()))
+  const [allRecords,    setAllRecordsState]  = useState(() => load('bt_records',       []))
+  const [memos,         setMemosState]       = useState(() => load('bt_memos',         []))
+  const [activeSleep,   setActiveSleepState] = useState(() => load('bt_active_sleep',  null))
+  const [roomId,        setRoomIdState]      = useState(() => load('bt_room_id',       null))
+  const [roomCode,      setRoomCodeState]    = useState(() => load('bt_room_code',     null))
+  const [memberCount,   setMemberCount]      = useState(1)
+  const [syncStatus,    setSyncStatus]       = useState('local')
+  const [isOnline,      setIsOnline]         = useState(navigator.onLine)
 
-  // 연결 직후 초기 데이터를 알림에서 제외하기 위한 타임스탬프
   const connectedAt = useRef(0)
+
+  // 현재 활성 아기 (computed)
+  const baby = useMemo(
+    () => babies.find(b => b.id === activeBabyId) || babies[0] || null,
+    [babies, activeBabyId]
+  )
+
+  // 활성 아기의 기록만 필터링 (구버전 babyId 없는 기록은 첫 번째 아기 소속)
+  const records = useMemo(() => {
+    const firstBabyId = babies[0]?.id
+    return allRecords.filter(r => {
+      if (r.babyId) return r.babyId === activeBabyId
+      return activeBabyId === firstBabyId
+    })
+  }, [allRecords, activeBabyId, babies])
 
   // ─ 온/오프라인 감지
   useEffect(() => {
@@ -63,9 +103,18 @@ export function AppProvider({ children }) {
     const off = () => setIsOnline(false)
     window.addEventListener('online',  on)
     window.addEventListener('offline', off)
-    return () => {
-      window.removeEventListener('online',  on)
-      window.removeEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+
+  // ─ URL 파라미터에서 join 코드 감지
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const joinCode = params.get('join')
+    if (joinCode) {
+      localStorage.setItem('bt_pending_join', joinCode.toUpperCase())
+      const url = new URL(window.location)
+      url.searchParams.delete('join')
+      window.history.replaceState({}, '', url.toString())
     }
   }, [])
 
@@ -77,21 +126,19 @@ export function AppProvider({ children }) {
     connectedAt.current = Date.now()
     const myId = getDeviceId()
 
-    // 기록 리스너
     const unsubRecords = onSnapshot(
       collection(db, 'families', roomId, 'records'),
       snap => {
         const data = snap.docs
           .map(d => ({ ...d.data(), id: d.id }))
           .sort((a, b) => b.startTime - a.startTime)
-        setRecordsState(data)
+        setAllRecordsState(data)
         save('bt_records', data)
         setSyncStatus('synced')
 
         snap.docChanges().forEach(change => {
           if (change.type !== 'added') return
           const r = change.doc.data()
-          // 연결 후 4초 이상 지난 새 기록만 알림 (초기 로드 제외)
           if (Date.now() - connectedAt.current > 4000 && r.createdBy && r.createdBy !== myId) {
             notifyPartner('record', r)
           }
@@ -100,7 +147,6 @@ export function AppProvider({ children }) {
       () => setSyncStatus('error')
     )
 
-    // 육아일지 리스너
     const unsubMemos = onSnapshot(
       collection(db, 'families', roomId, 'memos'),
       snap => {
@@ -120,56 +166,139 @@ export function AppProvider({ children }) {
       }
     )
 
-    // 가족 문서 (아기 정보, activeSleep, 인원 수)
     const unsubFamily = onSnapshot(
       doc(db, 'families', roomId),
       snap => {
         if (!snap.exists()) return
         const d = snap.data()
-        if (d.baby !== undefined)         { setBabyState(d.baby);              save('bt_baby',         d.baby)         }
-        if (d.activeSleep !== undefined)  { setActiveSleepState(d.activeSleep); save('bt_active_sleep', d.activeSleep) }
-        if (d.memberCount !== undefined)    setMemberCount(d.memberCount)
+
+        // 다중 아기 (신규 포맷)
+        if (d.babies !== undefined) {
+          const remoteBabies = d.babies
+          const currentBabies = load('bt_babies', [])
+          // 로컬 사진 보존 (Firestore에는 사진 미저장)
+          const merged = remoteBabies.map(rb => ({
+            ...rb,
+            photo: currentBabies.find(lb => lb.id === rb.id)?.photo,
+          }))
+          setBabiesState(merged)
+          save('bt_babies', merged)
+        } else if (d.baby !== undefined) {
+          // 구버전 단일 아기 마이그레이션
+          const oldBaby = { ...d.baby, id: d.baby.id || 'baby_1' }
+          const currentBabies = load('bt_babies', [])
+          const merged = [{ ...oldBaby, photo: currentBabies.find(lb => lb.id === oldBaby.id)?.photo }]
+          setBabiesState(merged)
+          save('bt_babies', merged)
+        }
+
+        if (d.activeBabyId !== undefined) {
+          setActiveBabyIdState(d.activeBabyId)
+          save('bt_active_baby_id', d.activeBabyId)
+        }
+        if (d.activeSleep !== undefined) {
+          setActiveSleepState(d.activeSleep)
+          save('bt_active_sleep', d.activeSleep)
+        }
+        if (d.memberCount !== undefined) setMemberCount(d.memberCount)
       }
     )
 
     return () => { unsubRecords(); unsubMemos(); unsubFamily() }
   }, [roomId])
 
-  // ─── 아기 정보 저장
-  const setBaby = useCallback(async b => {
-    setBabyState(b)
-    save('bt_baby', b)
-    if (roomId && db) await setDoc(doc(db, 'families', roomId), { baby: b }, { merge: true })
+  // ─── 아기 업데이트 (active baby 수정)
+  const setBaby = useCallback(async updates => {
+    setBabiesState(prev => {
+      const next = prev.map(b => b.id === activeBabyId ? { ...b, ...updates } : b)
+      save('bt_babies', next)
+      return next
+    })
+    if (roomId && db) {
+      const currentBabies = babies.map(b =>
+        b.id === activeBabyId ? { ...stripPhoto(b), ...stripPhoto(updates) } : stripPhoto(b)
+      )
+      await setDoc(doc(db, 'families', roomId), { babies: currentBabies }, { merge: true })
+    }
+  }, [activeBabyId, babies, roomId])
+
+  // ─── 아기 추가
+  const addBaby = useCallback(async babyData => {
+    const newBaby = { ...babyData, id: Date.now().toString(), createdAt: Date.now() }
+    const newBabies = [...babies, newBaby]
+    setBabiesState(newBabies)
+    save('bt_babies', newBabies)
+    setActiveBabyIdState(newBaby.id)
+    save('bt_active_baby_id', newBaby.id)
+    if (roomId && db) {
+      await setDoc(doc(db, 'families', roomId), { babies: newBabies.map(stripPhoto), activeBabyId: newBaby.id }, { merge: true })
+    }
+    return newBaby
+  }, [babies, roomId])
+
+  // ─── 아기 삭제
+  const deleteBaby = useCallback(async id => {
+    const newBabies = babies.filter(b => b.id !== id)
+    setBabiesState(newBabies)
+    save('bt_babies', newBabies)
+    // 삭제한 아기가 active이면 다음 아기로 전환
+    if (activeBabyId === id) {
+      const nextId = newBabies[0]?.id || null
+      setActiveBabyIdState(nextId)
+      save('bt_active_baby_id', nextId)
+    }
+    // 해당 아기 기록 제거
+    setAllRecordsState(prev => {
+      const firstBabyId = babies[0]?.id
+      const next = prev.filter(r => {
+        if (r.babyId) return r.babyId !== id
+        return id !== firstBabyId // 구버전 기록 처리
+      })
+      save('bt_records', next)
+      return next
+    })
+    if (roomId && db) {
+      await setDoc(doc(db, 'families', roomId), { babies: newBabies.map(stripPhoto) }, { merge: true })
+    }
+  }, [babies, activeBabyId, roomId])
+
+  // ─── 활성 아기 전환
+  const setActiveBaby = useCallback(async id => {
+    setActiveBabyIdState(id)
+    save('bt_active_baby_id', id)
+    if (roomId && db) {
+      await setDoc(doc(db, 'families', roomId), { activeBabyId: id }, { merge: true })
+    }
   }, [roomId])
 
-  // ─── 기록 추가
+  // ─── 기록 추가 (babyId 자동 포함)
   const addRecord = useCallback(async record => {
-    const enriched = { ...record, createdBy: getDeviceId(), createdAt: Date.now() }
-    setRecordsState(prev => {
+    const enriched = { ...record, babyId: activeBabyId, createdBy: getDeviceId(), createdAt: Date.now() }
+    setAllRecordsState(prev => {
       const next = [enriched, ...prev].sort((a, b) => b.startTime - a.startTime)
       save('bt_records', next)
       return next
     })
     if (roomId && db) await setDoc(doc(db, 'families', roomId, 'records', record.id), enriched)
-  }, [roomId])
+  }, [roomId, activeBabyId])
 
   // ─── 기록 수정
   const updateRecord = useCallback(async (id, updates) => {
-    setRecordsState(prev => {
+    setAllRecordsState(prev => {
       const next = prev.map(r => r.id === id ? { ...r, ...updates } : r)
         .sort((a, b) => b.startTime - a.startTime)
       save('bt_records', next)
       return next
     })
     if (roomId && db) {
-      const current = records.find(r => r.id === id)
+      const current = allRecords.find(r => r.id === id)
       if (current) await setDoc(doc(db, 'families', roomId, 'records', id), { ...current, ...updates })
     }
-  }, [roomId, records])
+  }, [roomId, allRecords])
 
   // ─── 기록 삭제
   const deleteRecord = useCallback(async id => {
-    setRecordsState(prev => { const n = prev.filter(r => r.id !== id); save('bt_records', n); return n })
+    setAllRecordsState(prev => { const n = prev.filter(r => r.id !== id); save('bt_records', n); return n })
     if (roomId && db) await deleteDoc(doc(db, 'families', roomId, 'records', id))
   }, [roomId])
 
@@ -188,11 +317,11 @@ export function AppProvider({ children }) {
 
   // ─── 수면 시작
   const startSleep = useCallback(async patternId => {
-    const s = { id: Date.now().toString(), patternId, startTime: Date.now() }
+    const s = { id: Date.now().toString(), patternId, startTime: Date.now(), babyId: activeBabyId }
     setActiveSleepState(s)
     save('bt_active_sleep', s)
     if (roomId && db) await setDoc(doc(db, 'families', roomId), { activeSleep: s }, { merge: true })
-  }, [roomId])
+  }, [roomId, activeBabyId])
 
   // ─── 수면 종료
   const endSleep = useCallback(async () => {
@@ -211,11 +340,17 @@ export function AppProvider({ children }) {
     const code     = generateRoomCode()
     const familyId = (crypto.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2))
 
-    await setDoc(doc(db, 'rooms', code),        { familyId, createdAt: Date.now() })
-    await setDoc(doc(db, 'families', familyId), { baby: baby || {}, activeSleep: null, memberCount: 1, createdAt: Date.now() })
+    await setDoc(doc(db, 'rooms', code), { familyId, createdAt: Date.now() })
+    await setDoc(doc(db, 'families', familyId), {
+      babies: babies.map(stripPhoto),
+      activeBabyId,
+      activeSleep: null,
+      memberCount: 1,
+      createdAt: Date.now(),
+    })
 
     const myId = getDeviceId()
-    for (const r of records)
+    for (const r of allRecords)
       await setDoc(doc(db, 'families', familyId, 'records', r.id), { ...r, createdBy: myId, createdAt: Date.now() })
     for (const m of memos)
       await setDoc(doc(db, 'families', familyId, 'memos', m.id),   { ...m, createdBy: myId, createdAt: Date.now() })
@@ -225,7 +360,7 @@ export function AppProvider({ children }) {
     save('bt_room_id',   familyId)
     save('bt_room_code', code)
     return code
-  }, [baby, records, memos])
+  }, [babies, activeBabyId, allRecords, memos])
 
   // ─── 방 참여
   const joinRoom = useCallback(async code => {
@@ -259,12 +394,19 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      baby, setBaby,
+      // 다중 아기
+      babies, baby, setBaby, addBaby, deleteBaby,
+      activeBabyId, setActiveBaby,
+      // 기록 (현재 아기 기준 필터링)
       records, addRecord, updateRecord, deleteRecord,
+      // 육아일지
       memos, addMemo, deleteMemo,
+      // 수면
       activeSleep, startSleep, endSleep,
+      // 공유 방
       roomId, roomCode, memberCount,
       createRoom, joinRoom, leaveRoom,
+      // 상태
       isOnline, syncStatus,
       patterns: DEFAULT_PATTERNS,
     }}>

@@ -1,6 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
 import { isFirebaseConfigured } from '../firebase'
+
+function getShareUrl(code) {
+  const base = `${window.location.protocol}//${window.location.host}${window.location.pathname.replace(/\/$/, '')}`
+  return `${base}?join=${code}`
+}
 
 export default function RoomSetup({ onSkip }) {
   const { createRoom, joinRoom } = useApp()
@@ -9,6 +14,16 @@ export default function RoomSetup({ onSkip }) {
   const [generatedCode, setGeneratedCode] = useState('')
   const [loading,       setLoading]       = useState(false)
   const [error,         setError]         = useState('')
+
+  // URL 파라미터 또는 localStorage의 pending join 코드 자동 입력
+  useEffect(() => {
+    const pending = localStorage.getItem('bt_pending_join')
+    if (pending) {
+      setJoinCode(pending)
+      setMode('join')
+      localStorage.removeItem('bt_pending_join')
+    }
+  }, [])
 
   async function handleCreate() {
     setLoading(true)
@@ -31,7 +46,6 @@ export default function RoomSetup({ onSkip }) {
     setError('')
     try {
       await joinRoom(code)
-      // joinRoom이 성공하면 App.jsx에서 roomId가 설정돼 자동으로 메인으로 이동
     } catch (e) {
       setError(e.message)
       setLoading(false)
@@ -42,15 +56,22 @@ export default function RoomSetup({ onSkip }) {
     navigator.clipboard?.writeText(generatedCode).catch(() => {})
   }
 
-  // Firebase 미설정 시 안내만 표시
+  function handleEmailInvite() {
+    const url = getShareUrl(generatedCode)
+    const subject = encodeURIComponent('BabyTime 육아 기록 공유 초대')
+    const body = encodeURIComponent(
+      `안녕하세요!\n\nBabyTime 앱에서 함께 육아 기록을 공유하고 싶어요.\n\n아래 링크를 클릭하면 바로 연결됩니다:\n\n${url}\n\n링크가 안 되면 앱에서 직접 코드 입력: ${generatedCode}`
+    )
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+
+  // Firebase 미설정
   if (!isFirebaseConfigured) {
     return (
       <div className="setup-page">
         <div className="setup-emoji">☁️</div>
         <h1 className="setup-title">가족 공유</h1>
-        <p className="setup-subtitle">
-          공유 기능을 사용하려면<br />Firebase 설정이 필요합니다
-        </p>
+        <p className="setup-subtitle">공유 기능을 사용하려면<br />Firebase 설정이 필요합니다</p>
         <div className="card" style={{ width: '100%', marginBottom: 16, textAlign: 'left' }}>
           <div className="card-title">설정 방법</div>
           <ol style={{ paddingLeft: 18, fontSize: 13, color: 'var(--text-light)', lineHeight: 2 }}>
@@ -58,60 +79,46 @@ export default function RoomSetup({ onSkip }) {
             <li>새 프로젝트 생성</li>
             <li>Firestore Database 활성화</li>
             <li>웹 앱 추가 → config 복사</li>
-            <li>web/.env 파일에 값 입력</li>
-            <li>GitHub Actions에 시크릿 추가</li>
+            <li>설정 &gt; 가족 공유 시작에서 붙여넣기</li>
           </ol>
         </div>
-        <button className="btn-primary" onClick={onSkip}>
-          나중에 설정할게요 →
-        </button>
+        <button className="btn-primary" onClick={onSkip}>나중에 설정할게요 →</button>
       </div>
     )
   }
 
-  // 방 생성 완료 화면
+  // 방 생성 완료
   if (mode === 'created') {
+    const shareUrl = getShareUrl(generatedCode)
     return (
       <div className="setup-page">
         <div className="setup-emoji">🎉</div>
         <h1 className="setup-title">방이 만들어졌어요!</h1>
-        <p className="setup-subtitle">이 코드를 파트너에게 공유하세요</p>
+        <p className="setup-subtitle">파트너에게 초대를 보내세요</p>
 
-        <div style={{
-          background: 'var(--primary)',
-          color: 'white',
-          borderRadius: 20,
-          padding: '24px 32px',
-          fontSize: 40,
-          fontWeight: 900,
-          letterSpacing: 8,
-          marginBottom: 16,
-          cursor: 'pointer',
-          userSelect: 'all',
-        }} onClick={copyCode}>
+        <div
+          style={{ background: 'var(--primary)', color: 'white', borderRadius: 20, padding: '24px 32px', fontSize: 40, fontWeight: 900, letterSpacing: 8, marginBottom: 16, cursor: 'pointer', userSelect: 'all' }}
+          onClick={copyCode}
+        >
           {generatedCode}
         </div>
-        <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 24 }}>
-          클릭하면 복사돼요
-        </p>
+        <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 16 }}>코드를 클릭하면 복사돼요</p>
 
-        <div className="card" style={{ width: '100%', marginBottom: 20 }}>
-          <p style={{ fontSize: 13, color: 'var(--text-light)', lineHeight: 1.8 }}>
-            📱 파트너가 앱을 열고 <strong>코드 입력</strong>을 선택한 뒤<br />
-            위 코드를 입력하면 기록이 실시간으로 공유돼요!
+        {/* 이메일 초대 */}
+        <div className="card" style={{ width: '100%', marginBottom: 16, textAlign: 'left' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>📧 이메일로 초대하기</div>
+          <p style={{ fontSize: 13, color: 'var(--text-light)', lineHeight: 1.6, marginBottom: 12 }}>
+            파트너 이메일로 참여 링크를 전송합니다.<br />
+            링크 클릭 시 자동으로 이 방에 연결됩니다.
           </p>
+          <div style={{ fontSize: 11, color: 'var(--text-light)', background: 'var(--bg)', borderRadius: 8, padding: '8px 10px', marginBottom: 10, wordBreak: 'break-all', fontFamily: 'monospace' }}>
+            {shareUrl}
+          </div>
+          <button className="btn-primary" onClick={handleEmailInvite}>✉️ 이메일로 초대 보내기</button>
         </div>
 
-        <button className="btn-primary" onClick={onSkip}>
-          시작하기 →
-        </button>
-        <button
-          className="btn-secondary"
-          onClick={copyCode}
-          style={{ marginTop: 8 }}
-        >
-          📋 코드 복사하기
-        </button>
+        <button className="btn-secondary" onClick={onSkip}>시작하기 →</button>
+        <button className="btn-secondary" onClick={copyCode} style={{ marginTop: 8 }}>📋 코드 복사</button>
       </div>
     )
   }
@@ -125,31 +132,11 @@ export default function RoomSetup({ onSkip }) {
         <p className="setup-subtitle">엄마·아빠가 실시간으로 기록을 공유할 수 있어요</p>
 
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-          <button
-            className="btn-primary"
-            onClick={() => { setMode('create'); handleCreate() }}
-            disabled={loading}
-          >
+          <button className="btn-primary" onClick={() => { setMode('create'); handleCreate() }} disabled={loading}>
             {loading ? '방 만드는 중...' : '🏠 방 만들기 (처음 시작)'}
           </button>
-          <button
-            className="btn-secondary"
-            onClick={() => setMode('join')}
-          >
-            🔑 코드 입력 (파트너 방 참여)
-          </button>
-          <button
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-light)',
-              fontSize: 14,
-              cursor: 'pointer',
-              padding: '12px',
-              textDecoration: 'underline',
-            }}
-            onClick={onSkip}
-          >
+          <button className="btn-secondary" onClick={() => setMode('join')}>🔑 코드 입력 (파트너 방 참여)</button>
+          <button style={{ background: 'none', border: 'none', color: 'var(--text-light)', fontSize: 14, cursor: 'pointer', padding: '12px', textDecoration: 'underline' }} onClick={onSkip}>
             혼자 쓸게요 (나중에 공유 설정 가능)
           </button>
         </div>
@@ -158,14 +145,12 @@ export default function RoomSetup({ onSkip }) {
           <div className="card-title">공유 기능 안내</div>
           <div style={{ fontSize: 13, color: 'var(--text-light)', lineHeight: 1.9 }}>
             ✅ 기록 추가 시 파트너 기기에 즉시 반영<br />
-            ✅ 앱이 열려있으면 알림 수신<br />
+            ✉️ 이메일 링크로 간편하게 초대<br />
             ✅ 오프라인에서도 기록 가능 (나중에 동기화)
           </div>
         </div>
 
-        {error && (
-          <div style={{ color: 'red', fontSize: 13, marginTop: 12 }}>{error}</div>
-        )}
+        {error && <div style={{ color: 'red', fontSize: 13, marginTop: 12 }}>{error}</div>}
       </div>
     )
   }
@@ -184,33 +169,16 @@ export default function RoomSetup({ onSkip }) {
           placeholder="ABC123"
           value={joinCode}
           onChange={e => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
-          style={{
-            fontSize: 28,
-            textAlign: 'center',
-            letterSpacing: 6,
-            fontWeight: 700,
-            marginBottom: 12,
-          }}
+          style={{ fontSize: 28, textAlign: 'center', letterSpacing: 6, fontWeight: 700, marginBottom: 12 }}
           maxLength={6}
           autoFocus
           autoCapitalize="characters"
         />
-
-        {error && (
-          <div style={{ color: 'red', fontSize: 13, marginBottom: 12 }}>{error}</div>
-        )}
-
-        <button
-          className="btn-primary"
-          onClick={handleJoin}
-          disabled={loading || joinCode.length !== 6}
-          style={{ opacity: joinCode.length === 6 ? 1 : 0.5 }}
-        >
+        {error && <div style={{ color: 'red', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        <button className="btn-primary" onClick={handleJoin} disabled={loading || joinCode.length !== 6} style={{ opacity: joinCode.length === 6 ? 1 : 0.5 }}>
           {loading ? '연결 중...' : '참여하기'}
         </button>
-        <button className="btn-secondary" onClick={() => { setMode(null); setError('') }}>
-          뒤로
-        </button>
+        <button className="btn-secondary" onClick={() => { setMode(null); setError('') }}>뒤로</button>
       </div>
     </div>
   )

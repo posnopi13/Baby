@@ -17,9 +17,11 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
   const [time, setTime] = useState(
     isEditMode ? formatDatetimeLocal(editRecord.startTime) : formatDatetimeLocal(Date.now())
   )
+  const [endTime, setEndTime] = useState(
+    isEditMode && editRecord.endTime ? formatDatetimeLocal(editRecord.endTime) : ''
+  )
   const [amount, setAmount] = useState(() => {
     if (isEditMode) return editRecord.amount?.toString() || ''
-    // 추가 모드: 마지막 입력한 양 불러오기
     const patId = defaultPatternId || patterns[0].id
     return localStorage.getItem('bt_last_amount_' + patId) || ''
   })
@@ -27,6 +29,7 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
 
   const selected = patterns.find(p => p.id === selectedId)
   const isSleep = selected?.category === 'SLEEP'
+  const hasEndTime = isEditMode && editRecord.endTime != null // 완료된 수면 기록
 
   // 추가 모드: 패턴 변경 시 마지막 양 자동 로드
   useEffect(() => {
@@ -58,11 +61,16 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
     saveLastAmount()
 
     if (isEditMode) {
-      onSave({
+      const updates = {
         startTime: ts,
         amount: amount ? parseFloat(amount) : null,
         note: note || null,
-      })
+      }
+      // 수면 종료시간 편집
+      if (hasEndTime && endTime) {
+        updates.endTime = new Date(endTime).getTime() || editRecord.endTime
+      }
+      onSave(updates)
       onClose()
       return
     }
@@ -91,7 +99,7 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
         <div className="modal-handle" />
         <div className="modal-title">{isEditMode ? '✏️ 기록 수정' : '기록 추가'}</div>
 
-        {/* 편집 모드에서는 패턴 변경 불가 */}
+        {/* 추가 모드: 패턴 선택 */}
         {!isEditMode && (
           <div className="form-group">
             <label className="form-label">종류</label>
@@ -127,7 +135,7 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
         ) : (
           <>
             <div className="form-group">
-              <label className="form-label">시간</label>
+              <label className="form-label">시작 시간</label>
               <input
                 type="datetime-local"
                 className="form-input"
@@ -135,6 +143,19 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
                 onChange={e => setTime(e.target.value)}
               />
             </div>
+
+            {/* 수면 종료시간 편집 (완료된 수면 기록만) */}
+            {hasEndTime && (
+              <div className="form-group">
+                <label className="form-label">종료 시간</label>
+                <input
+                  type="datetime-local"
+                  className="form-input"
+                  value={endTime}
+                  onChange={e => setEndTime(e.target.value)}
+                />
+              </div>
+            )}
 
             {selected?.hasAmount && (
               <div className="form-group">
@@ -147,7 +168,7 @@ export default function AddRecordModal({ onClose, defaultPatternId, editRecord, 
                   onChange={e => setAmount(e.target.value)}
                   inputMode="decimal"
                 />
-                {/* +/- 버튼 */}
+                {/* 빠른 조절 버튼 */}
                 <div className="amount-btns">
                   {DELTA_BTNS.map(d => (
                     <button

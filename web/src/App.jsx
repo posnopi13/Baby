@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { HashRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { AppProvider, useApp } from './context/AppContext'
 import { isFirebaseConfigured, onForegroundMessage } from './firebase'
@@ -32,9 +32,49 @@ const PAGE_TITLES = {
   '/stats': '통계', '/journal': '육아일지', '/settings': '설정',
 }
 
+// 아기 선택 모달
+function BabySelectorModal({ onClose }) {
+  const { babies, activeBabyId, setActiveBaby } = useApp()
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-sheet">
+        <div className="modal-handle" />
+        <div className="modal-title">👶 아기 선택</div>
+        {babies.map(b => (
+          <button
+            key={b.id}
+            onClick={() => { setActiveBaby(b.id); onClose() }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px 16px',
+              background: b.id === activeBabyId ? 'var(--bg)' : 'white',
+              border: `2px solid ${b.id === activeBabyId ? 'var(--primary)' : 'var(--border)'}`,
+              borderRadius: 14, cursor: 'pointer', marginBottom: 8, textAlign: 'left',
+            }}
+          >
+            {b.photo
+              ? <img src={b.photo} alt={b.name} style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+              : <span style={{ fontSize: 32, width: 44, textAlign: 'center' }}>
+                  {b.gender === 'MALE' ? '👦' : b.gender === 'FEMALE' ? '👧' : '🍼'}
+                </span>
+            }
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{b.name}</div>
+              {b.birthDate && <div style={{ fontSize: 12, color: 'var(--text-light)' }}>{b.birthDate}</div>}
+            </div>
+            {b.id === activeBabyId && <span style={{ color: 'var(--primary)', fontWeight: 700 }}>✓</span>}
+          </button>
+        ))}
+        <button className="btn-secondary" onClick={onClose}>닫기</button>
+      </div>
+    </div>
+  )
+}
+
 function AppShell() {
-  const { baby, roomId } = useApp()
+  const { baby, babies, roomId, joinRoom } = useApp()
   const { pathname } = useLocation()
+  const [showBabySelector, setShowBabySelector] = useState(false)
 
   // 성별에 따라 CSS 변수를 document root에도 적용 (전역 테마)
   useEffect(() => {
@@ -54,6 +94,15 @@ function AppShell() {
     })
     return unsub
   }, [])
+
+  // URL 파라미터에서 pending join 처리 (이메일 링크 클릭 시)
+  useEffect(() => {
+    const pending = localStorage.getItem('bt_pending_join')
+    if (pending && isFirebaseConfigured && !roomId) {
+      localStorage.removeItem('bt_pending_join')
+      joinRoom(pending).catch(e => console.warn('Auto-join failed:', e.message))
+    }
+  }, [baby, roomId, joinRoom])
 
   // 1단계: 아기 정보 미설정
   if (!baby) return <BabySetup />
@@ -77,12 +126,31 @@ function AppShell() {
   return (
     <div className="app-shell" style={theme}>
       <header className="header">
-        <div>
+        <div style={{ flex: 1 }}>
           <div className="header-title">🍼 {title}</div>
           {pathname === '/' && (
             <div className="header-subtitle">{baby.name}의 육아 기록</div>
           )}
         </div>
+        {/* 아기 선택 버튼 (복수 아기 등록 시) */}
+        {babies.length > 1 && (
+          <button
+            onClick={() => setShowBabySelector(true)}
+            style={{
+              background: 'rgba(255,255,255,0.2)', border: '2px solid rgba(255,255,255,0.4)',
+              borderRadius: 12, padding: '6px 10px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {baby.photo
+              ? <img src={baby.photo} alt={baby.name} style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: 22 }}>
+                  {baby.gender === 'MALE' ? '👦' : baby.gender === 'FEMALE' ? '👧' : '🍼'}
+                </span>
+            }
+            <span style={{ fontSize: 12, color: 'white', fontWeight: 700 }}>▾</span>
+          </button>
+        )}
       </header>
 
       <main className="page-content">
@@ -96,6 +164,8 @@ function AppShell() {
       </main>
 
       <BottomNav />
+
+      {showBabySelector && <BabySelectorModal onClose={() => setShowBabySelector(false)} />}
     </div>
   )
 }
